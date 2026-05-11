@@ -3,12 +3,12 @@
 <!-- [![arXiv](https://img.shields.io/badge/arXiv-2505.05799-b31b1b?logo=arxiv&logoColor=red)](https://arxiv.org/abs/2505.05799)&nbsp; -->
 
 GEMQ is a post-training quantization framework for Mixture-of-Experts (MoE) LLMs that enables extreme low-bit quantization (down to 1.5 bits per expert) with minimal accuracy degradation. GEMQ achieves this through:
-* a global linear-programming formulation for expert-wise mixed-precision bit allocation based on quantization error analysis;
-* efficient router fine-tuning to adapt routing policies to quantized experts;
-* optional progressive quantization that iteratively refines expert importance estimation.
+1. a global linear-programming formulation for expert-wise mixed-precision bit allocation based on quantization error analysis;
+2. efficient router fine-tuning to adapt routing policies to quantized experts;
+3. optional progressive quantization that iteratively refines expert importance estimation.
 
 
-#### What's in this repo
+### What's in this repo
 * An ILP solver for expert-level bit allocation
 * GPTQ-based quantization and router fine-tuning pipelines
 * Efficient low-bit MoE Triton kernels for **real** quantized inference
@@ -26,7 +26,7 @@ pip install -e .
 
 > [!NOTE]
 >
-> This project uses **gurobipy** as the integer linear programming (ILP) solver for bit allocation. A Gurobi license may be required for certain MoE models, especially those with a large number of experts.
+> This project currently uses **gurobipy** as the integer linear programming (ILP) solver for bit allocation. A Gurobi license may be required for certain MoE models, especially those with a large number of experts.
 
 
 
@@ -34,7 +34,7 @@ pip install -e .
 
 Demo scripts for Mixtral-8×7B and DeepSeek-V2-Lite are provided in `scripts`.
 
-### Bit Allocation
+### 1. Bit Allocation
 
 We provide pre-generated bit allocation configs under `configs`, which can be used directly for quantization. You may skip this section if you do not want to regenerate them. To generate the configs from scratch, follow the steps below.
 
@@ -47,7 +47,7 @@ We provide pre-generated bit allocation configs under `configs`, which can be us
 3. Run `scripts/allocate_<model>.sh` to solve the ILP for bit allocation using the generated model statistics. The allocation results (bit configs) will be saved under `configs`. 
 
 
-### Mixed-Precision Quantization
+### 2. Mixed-Precision Quantization
 
 Simply run `scripts/quantize_<model>.sh` for model quantization. Please refer to the scripts for detailed usage instructions.
 
@@ -56,7 +56,7 @@ The evaluation code will run automatically after quantization.
 Quantized models will be saved under `results`.
 
 
-### Inference
+### 3. Inference
 
 Use `scripts/bench_generate_<model>.sh` to run and benchmark the real quantized models.
 
