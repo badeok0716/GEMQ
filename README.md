@@ -2,16 +2,16 @@
 
 <!-- [![arXiv](https://img.shields.io/badge/arXiv-2505.05799-b31b1b?logo=arxiv&logoColor=red)](https://arxiv.org/abs/2505.05799)&nbsp; -->
 
-GEMQ is a post-training quantization framework for Mixture-of-Experts (MoE) LLMs that enables extreme low-bit quantization (down to 1.5 bits per expert) with minimal accuracy degradation. GEMQ achieves this through:
-1. a global linear-programming formulation for expert-wise mixed-precision bit allocation based on quantization error analysis;
-2. efficient router fine-tuning to adapt routing policies to quantized experts;
-3. optional progressive quantization that iteratively refines expert importance estimation.
+GEMQ is a post-training quantization framework for Mixture-of-Experts (MoE) LLMs that enables extreme low-bit quantization (down to 1.5 bits per expert) with minimal accuracy degradation. It works by:
+1. automatically assigning different bit-widths to experts based on their importance;
+2. fine-tuning the routers so they can better work with quantized experts;
+3. optionally using progressive quantization to refine the bit allocation.
 
 
 ### What's in this repo
-* An ILP solver for expert-level bit allocation
+* An ILP solver for global expert-level bit allocation
 * GPTQ-based quantization and router fine-tuning pipelines
-* Efficient low-bit MoE Triton kernels for **real** quantized inference
+* Efficient low-bit MoE triton kernels for **real** quantized inference
 
 
 ## Installation
@@ -26,17 +26,21 @@ pip install -e .
 
 > [!NOTE]
 >
-> This project currently uses **gurobipy** as the integer linear programming (ILP) solver for bit allocation. A Gurobi license may be required for certain MoE models, especially those with a large number of experts.
+> This project currently uses **gurobipy** as the integer linear programming (ILP) solver for bit allocation. A Gurobi license may be required for certain MoE models with a large number of experts, such as the DeepSeek and Qwen series.
 
 
 
 ## Usage
 
-Demo scripts for Mixtral-8×7B and DeepSeek-V2-Lite are provided in `scripts`.
+> All scripts for Mixtral-8×7B and DeepSeek-V2-Lite are provided in `scripts`.
 
 ### 1. Bit Allocation
 
-We provide pre-generated bit allocation configs under `configs`, which can be used directly for quantization. You may skip this section if you do not want to regenerate them. To generate the configs from scratch, follow the steps below.
+> [!NOTE]
+>
+> We provide pre-generated bit allocation configs under `configs`, which can be used directly for quantization. You may skip this section if you do not want to regenerate them.
+
+To generate the configs from scratch, follow the steps below.
 
 
 1. Download the first shard of the C4 training dataset (c4-train.00000-of-01024.json) from [allenai/c4](https://huggingface.co/datasets/allenai/c4/blob/main/en/c4-train.00000-of-01024.json.gz) and save it under `./data`.
@@ -49,16 +53,16 @@ We provide pre-generated bit allocation configs under `configs`, which can be us
 
 ### 2. Mixed-Precision Quantization
 
-Simply run `scripts/quantize_<model>.sh` for model quantization. Please refer to the scripts for detailed usage instructions.
+Simply run `scripts/quantize_<model>.sh` for model quantization. Please refer to the script for the detailed available options.
 
-The evaluation code will run automatically after quantization.
+The evaluation code runs automatically after quantization. If you want to evaluate the model on downstream tasks, please ensure that [lm-evaluation-harness](https://github.com/EleutherAI/lm-evaluation-harness) is installed.
 
 Quantized models will be saved under `results`.
 
 
 ### 3. Inference
 
-Use `scripts/bench_generate_<model>.sh` to run and benchmark the real quantized models.
+Use `scripts/bench_generate_<model>.sh` to run inference demos and benchmark the real quantized models.
 
 
 ## Acknowledgements
