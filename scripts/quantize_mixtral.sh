@@ -25,7 +25,8 @@ bit_cfg="configs/${model_name}/GEMQ/C4-Seed0_E${bpe}_B1,2,3_c2c3.pkl"
 # ===============================
 #  Router fine-tuning
 # ===============================
-# NOTE: 3x 80G GPUs are required for Mixtral-8x7B router fine-tuning
+# NOTE: Router fine-tuning for Mixtral-8x7B requires 3×80GB GPUs.
+# Set this option to false if you do not have sufficient resources.
 finetune_routers=true      # whether to finetune the routers after quantization
 rft_epochs=1
 rft_lr=1e-4

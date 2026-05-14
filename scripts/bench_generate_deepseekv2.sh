@@ -21,7 +21,7 @@ if [ "$mode" == "FP" ]; then
         --compile \
         --is_fp
 else
-    model_path="results/real_quant_models/${model_name}/GEMQ/C4-Seed0-WT2_A4-G16-D4-E2.0"
+    model_path="results/real_quant_models/${model_name}/GEMQ/C4-Seed0-WT2_A4-G16-D4-E2.0_RFT"
 
     # NOTE: if `trust_remote_code` is used, make sure `modeling_deepseek.py` is present in the local model folder.
     hf download deepseek-ai/DeepSeek-V2-Lite modeling_deepseek.py --local-dir $model_path
