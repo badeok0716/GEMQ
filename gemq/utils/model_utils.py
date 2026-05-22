@@ -13,6 +13,7 @@ from transformers.models.qwen3.modeling_qwen3 import Qwen3DecoderLayer
 from transformers.models.mixtral.modeling_mixtral import MixtralSparseMoeBlock
 from transformers.models.deepseek_v2.modeling_deepseek_v2 import DeepseekV2MoE
 from transformers.models.olmoe.modeling_olmoe import OlmoeSparseMoeBlock
+from transformers.models.qwen2_moe.modeling_qwen2_moe import Qwen2MoeSparseMoeBlock
 
 from accelerate import infer_auto_device_map, dispatch_model
 from accelerate.utils.modeling import get_balanced_memory
@@ -27,6 +28,7 @@ class ModelType(Enum):
     MIXTRAL = auto()
     DEEPSEEKV2 = auto()
     OLMOE = auto()
+    QWEN2MOE = auto()
     
 
 class LinearModuleType(Enum):
@@ -44,6 +46,7 @@ NAME_TO_MODEL = {
     "mistralai/Mixtral-8x7B-v0.1": ModelType.MIXTRAL,
     "deepseek-ai/DeepSeek-V2-Lite": ModelType.DEEPSEEKV2,
     "allenai/OLMoE-1B-7B-0924": ModelType.OLMOE,
+    "Qwen/Qwen1.5-MoE-A2.7B": ModelType.QWEN2MOE,
 }
 
 
@@ -69,7 +72,7 @@ def dispatch_model_to_all_devices(model):
             "Qwen3DecoderLayer",
             "MixtralDecoderLayer",
             "DeepseekV2DecoderLayer",
-
+            "Qwen2MoeDecoderLayer",
         ],
         max_memory=get_balanced_memory(model),
     )
@@ -108,6 +111,14 @@ def get_model_info(model_name):
             num_shared_experts_per_layer=0,
             num_experts_per_token=8,
         )
+    elif model_type == ModelType.QWEN2MOE:
+        model_info = ModelInfo(
+            num_layers=24,
+            first_k_dense_layers=0,
+            num_routed_experts_per_layer=60,
+            num_shared_experts_per_layer=1,
+            num_experts_per_token=4,
+        )
     else:
         raise NotImplementedError(f"Model type {model_type} not supported for getting model info.")
 
@@ -122,6 +133,7 @@ def get_blocks(model, model_name):
     if model_type in (
         ModelType.LLAMA2, ModelType.QWEN3,
         ModelType.MIXTRAL, ModelType.DEEPSEEKV2, ModelType.OLMOE,
+        ModelType.QWEN2MOE,
     ):
         blocks = model.model.layers
     else:
@@ -137,6 +149,7 @@ def move_embed(model, model_name, device):
     if model_type in (
         ModelType.LLAMA2, ModelType.QWEN3,
         ModelType.MIXTRAL, ModelType.DEEPSEEKV2, ModelType.OLMOE,
+        ModelType.QWEN2MOE,
     ):
         model.model.embed_tokens = model.model.embed_tokens.to(device)
 
@@ -149,6 +162,7 @@ def move_head(model, model_name, device):
     if model_type in (
         ModelType.LLAMA2, ModelType.QWEN3,
         ModelType.MIXTRAL, ModelType.DEEPSEEKV2, ModelType.OLMOE,
+        ModelType.QWEN2MOE,
     ):
         model.model.norm = model.model.norm.to(device)
         model.lm_head = model.lm_head.to(device)
@@ -177,7 +191,9 @@ def get_moe_block(layer, model_name):
         moe_block = layer.mlp
     elif model_type == ModelType.OLMOE:
         moe_block = layer.mlp
-    
+    elif model_type == ModelType.QWEN2MOE:
+        moe_block = layer.mlp
+
     return moe_block
 
 
@@ -188,6 +204,8 @@ def get_shared_expert_block(moe_block, model_name):
     model_type = NAME_TO_MODEL[model_name]
     if model_type == ModelType.DEEPSEEKV2:
         shared_expert = moe_block.shared_experts
+    elif model_type == ModelType.QWEN2MOE:
+        shared_expert = moe_block.shared_expert
     else:
         raise NotImplementedError(f"Model type {model_type} does not have shared experts.")
     return shared_expert
@@ -200,9 +218,9 @@ def get_sublinear_names(model_name):
     model_type = NAME_TO_MODEL[model_name]
     if model_type == ModelType.MIXTRAL:
         sublinear_names = ["w1", "w2", "w3"]
-    elif model_type in (ModelType.DEEPSEEKV2, ModelType.OLMOE):
+    elif model_type in (ModelType.DEEPSEEKV2, ModelType.OLMOE, ModelType.QWEN2MOE):
         sublinear_names = ["gate_proj", "up_proj", "down_proj"]
-    
+
     return sublinear_names
 
 
@@ -256,6 +274,17 @@ def get_module_type(module_name, model_name):
         else:
             mtype = LinearModuleType.OTHERS
 
+    elif model_type == ModelType.QWEN2MOE:
+        if "attn" in module_name:
+            mtype = LinearModuleType.ATTN
+        elif ("gate" in module_name) and ("proj" not in module_name):
+            # matches both "mlp.gate" (router) and "mlp.shared_expert_gate"
+            mtype = LinearModuleType.GATE
+        elif ("experts" in module_name) or ("shared_expert" in module_name):
+            mtype = LinearModuleType.EXPERT
+        else:
+            mtype = LinearModuleType.OTHERS
+
 
     return mtype
 
@@ -269,6 +298,9 @@ def get_expert_id(name, model_name):
         exp_id = int(name.split(".")[-2])
     elif model_type == ModelType.DEEPSEEKV2:
         exp_id = 64 if "shared_experts" in name else int(name.split(".")[-2])
+    elif model_type == ModelType.QWEN2MOE:
+        # shared_expert always sits at the last index (60 for Qwen1.5-MoE-A2.7B)
+        exp_id = 60 if "shared_expert" in name else int(name.split(".")[-2])
 
     return exp_id
 
@@ -285,6 +317,8 @@ def get_all_expert_names(model_name):
         all_expert_names = [f"mlp.experts.{i}" for i in range(model_info.num_routed_experts_per_layer)] + ["mlp.shared_experts"]
     elif model_type == ModelType.OLMOE:
         all_expert_names = [f"mlp.experts.{i}" for i in range(model_info.num_routed_experts_per_layer)]
+    elif model_type == ModelType.QWEN2MOE:
+        all_expert_names = [f"mlp.experts.{i}" for i in range(model_info.num_routed_experts_per_layer)] + ["mlp.shared_expert"]
 
     return all_expert_names
 
@@ -470,6 +504,43 @@ def compute_gate_stats_hook_olmoe(m, x, y, inps, outs, weights, counts):
     outs.append(y[0])  # (bsz, seqlen, hidden_size)
 
 
+def compute_gate_stats_hook_qwen2moe(m, x, y, inps, outs, weights, counts):
+    """
+    Hook function to compute gate statistics (expert frequency and weights) for Qwen2MoeSparseMoeBlock block.
+    """
+    assert isinstance(m, Qwen2MoeSparseMoeBlock)
+
+    hidden_states = x[0]  # (bsz, seqlen, hidden_size)
+    router_logits = y[1]  # (bsz * sequence_length, n_experts)
+    device = router_logits.device
+
+    routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+    routing_weights, selected_experts = torch.topk(routing_weights, m.top_k, dim=-1)
+    if m.norm_topk_prob:
+        routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+
+    # routed-expert weights/counts
+    actw = torch.zeros(m.num_experts, device=device)
+    actw.scatter_add_(0, selected_experts.view(-1), routing_weights.view(-1))
+
+    actc = torch.zeros(m.num_experts, dtype=torch.long, device=device)
+    ones = torch.ones_like(selected_experts.view(-1), device=device)
+    actc.scatter_add_(0, selected_experts.view(-1), ones)
+
+    # shared-expert: hit by every token (gated by sigmoid scale, but routing is 100%).
+    bsz, seqlen, _ = hidden_states.shape
+    n_tokens = bsz * seqlen
+    shared_actw = actw.new_ones(1) * n_tokens
+    shared_actc = actc.new_ones(1) * n_tokens
+    actw = torch.cat([actw, shared_actw], dim=0)  # (num_routed + 1,)
+    actc = torch.cat([actc, shared_actc], dim=0)
+
+    weights.append(actw.to("cpu"))
+    counts.append(actc.to("cpu"))
+    inps.append(x[0])
+    outs.append(y[0])
+
+
 def get_gate_stats_hook_fn(model_name):
     """
     Get the appropriate hook function for computing router statistics based on model type.
@@ -481,6 +552,8 @@ def get_gate_stats_hook_fn(model_name):
         hook_fn = compute_gate_stats_hook_deepseekmoe
     elif model_type == ModelType.OLMOE:
         hook_fn = compute_gate_stats_hook_olmoe
+    elif model_type == ModelType.QWEN2MOE:
+        hook_fn = compute_gate_stats_hook_qwen2moe
     else:
         raise NotImplementedError(f"Model type {model_type} not supported for gate stats computation.")
 

@@ -146,3 +146,81 @@ class GEMQSolver:
 
         return opt_set
 
+    def build_block_ilp(self, layer_idx, total_bits):
+        """
+        Build an ILP restricted to a single MoE block (one layer's experts).
+
+        Args:
+            layer_idx: absolute block index in self.coef (must be >= start_layer_idx)
+            total_bits: raw-bit budget for the experts inside this block
+        Returns:
+            gp.Model with binary x[j, k] for j in experts, k in x_space
+        """
+        m = gp.Model(f"ilp_block_{layer_idx}")
+
+        vars = {}
+        for j in range(self.num_experts):
+            for k in self.x_space:
+                vars[j, k] = m.addVar(vtype=GRB.BINARY, name=f"x_{j}_{k}")
+
+        m.setObjective(
+            sum(
+                self.coef[layer_idx][j][k] * vars[j, k]
+                for j in range(self.num_experts)
+                for k in self.x_space
+            ),
+            GRB.MINIMIZE,
+        )
+
+        # budget
+        m.addConstr(
+            sum(vars[j, k] * k for j in range(self.num_experts) for k in self.x_space) <= total_bits,
+            name="b0",
+        )
+
+        # one bit per expert
+        for j in range(self.num_experts):
+            m.addConstr(sum(vars[j, k] for k in self.x_space) == 1, name=f"b1_{j}")
+
+        # per-block c2c3 (mirrors the global solver): require at least one expert at
+        # the 2nd-highest and the highest candidate bit so a single layer cannot be
+        # collapsed entirely to a sub-budget configuration when the budget allows.
+        # Treat c2+c3 as a single joint constraint and only add it when the budget
+        # supports both at once — individually-feasible guards make the LP infeasible
+        # at the boundary (one expert at highest, one at 2nd-highest, rest at lowest).
+        if self.extra_constr == "c2c3":
+            bits = sorted(self.x_space, reverse=True)
+            joint_min = bits[0] + bits[1] + (self.num_experts - 2) * bits[-1]
+            if total_bits >= joint_min - 1e-9:
+                m.addConstr(sum(vars[j, bits[1]] for j in range(self.num_experts)) >= 1, name="b2")
+                m.addConstr(sum(vars[j, bits[0]] for j in range(self.num_experts)) >= 1, name="b3")
+
+        return m
+
+    def solve_block(self, layer_idx, total_bits):
+        """
+        Solve the per-block ILP. Returns `{layer_idx: {j: bit, ...}}`.
+        """
+        try:
+            m = self.build_block_ilp(layer_idx, total_bits)
+            m.setParam("OutputFlag", 0)  # quiet — we sweep many blocks
+            m.optimize()
+
+            if m.Status != GRB.OPTIMAL:
+                print(f"  [block {layer_idx}] non-optimal status={m.Status} budget={total_bits}")
+                m.dispose()
+                return None
+
+            opt = {}
+            for v in m.getVars():
+                if v.X > 1e-6:
+                    j, k = map(int, v.VarName.split("_")[1:])
+                    opt[j] = k
+            obj = float(m.ObjVal)
+            m.dispose()
+            return {layer_idx: opt}, obj
+
+        except gp.GurobiError as e:
+            print(f"Error code {e.errno}: {e}")
+            return None
+
