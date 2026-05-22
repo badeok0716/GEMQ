@@ -1,38 +1,38 @@
 #!/bin/bash
 # Runs ON gateway. After gateway_pull.sh has staged cache/<MODEL>/LayerRE_*.pkl,
 # this script runs:
-#   1) the GEMQ global ILP at effective bpe ∈ {1.5, 2.0, 2.5}
+#   1) the GEMQ global ILP at three effective bpe targets
 #   2) the per-block ILP swept over tb ∈ [tb_min, tb_max] at step 0.125 (effective bits)
-#
-# Outputs:
-#   configs/<MODEL>/GEMQ/C4-Seed0_Eeff{T}_B1,2,3_c2c3.pkl                (3 files)
-#   configs/<MODEL>/PerBlockEff/C4-Seed0_tb{lo}-{hi}-{step}_B1,2,3_c2c3.pkl (1 aggregate file)
 #
 # Positional args:
 #   $1  SHORT_NAME ∈ {mixtral8x7b, deepseekv2lite, qwen15moe}
-#   $2  tb_min   (default 1.125 — effective bits/expert at 1-bit symmetric+s, gs=128)
-#   $3  tb_max   (default 3.250 — effective bits/expert at 3-bit asym+s+z, gs=128)
+#   $2  tb_min   (default depends on QUANT_SCHEME)
+#   $3  tb_max   (default depends on QUANT_SCHEME)
 #   $4  tb_step  (default 0.125)
 #
-# Notes:
-# - "Effective bit" = raw bit + (16+16)/groupsize for asymmetric (k>=2), or
-#   16/groupsize for symmetric (k=1, which GEMQ's binary path uses). Default
-#   bit_cost mapping at groupsize=128: {1: 1.125, 2: 2.25, 3: 3.25}.
-#   See gemq/quantizers/rtn.py:binary and gemq/quantizers/gptq.py:find_params
-#   for the symmetric-1-bit + asymmetric-multi-bit convention.
-# - Gurobi: a full license is required for DeepSeek-V2-Lite and Qwen1.5-MoE
-#   global ILP (variable count > free limit). Per-block sub-problems stay
-#   under the free limit. Skip the global step with `SKIP_GLOBAL=1` if needed.
+# Env:
+#   QUANT_SCHEME=gemq  (default) — wbits=1,2,3; 1-bit symmetric `binary`
+#                                  effective bit_cost = {1:1.125, 2:2.25, 3:3.25}
+#                                  default tb sweep [1.125, 3.250]
+#   QUANT_SCHEME=mxmoe            — wbits=1,2,3,4; ALL asymmetric per-group scale+zero
+#                                  effective bit_cost = {1:1.25, 2:2.25, 3:3.25, 4:4.25}
+#                                  default tb sweep [1.250, 4.250]
+#                                  REQUIRES the matching `QUANT_SCHEME=mxmoe`
+#                                  b200_compute_stats.sh run (LayerRE_*_asym1_*.pkl).
+#   SKIP_GLOBAL=1                 — skip the 3 global runs (e.g. Gurobi license issues
+#                                  on DeepSeek/Qwen).
+#
+# Outputs:
+#   configs/<MODEL>/GEMQ/C4-Seed0_Eeff{T}_B{cands}_c2c3.pkl                (3 files)
+#   configs/<MODEL>/PerBlockEff/C4-Seed0_tb{lo}-{hi}-{step}_B{cands}_c2c3.pkl (1 aggregate)
 
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-    echo "usage: $0 <short_name> [tb_min tb_max [tb_step]]"; exit 1
+    echo "usage: QUANT_SCHEME={gemq|mxmoe} $0 <short_name> [tb_min tb_max [tb_step]]"
+    exit 1
 fi
 SHORT="$1"
-TB_MIN="${2:-1.125}"
-TB_MAX="${3:-3.250}"
-TB_STEP="${4:-0.125}"
 
 case "$SHORT" in
     mixtral8x7b)    MODEL="mistralai/Mixtral-8x7B-v0.1" ;;
@@ -43,47 +43,74 @@ esac
 
 cd /data_fast/home/deokjae/QUANT_works/GEMQ
 
-LAYER_RE="cache/${MODEL}/LayerRE_c4-N128-L2048-Seed0_B1,2,3_faster.pkl"
+QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
+case "$QUANT_SCHEME" in
+    gemq)
+        BIT_CANDS="1,2,3"
+        BIT_COST=""                            # auto-derived: {1:1.125, 2:2.25, 3:3.25}
+        STATS_TAG=""
+        TB_MIN_DEFAULT=1.125
+        TB_MAX_DEFAULT=3.250
+        ;;
+    mxmoe)
+        BIT_CANDS="1,2,3,4"
+        BIT_COST="1:1.25,2:2.25,3:3.25,4:4.25"  # uniform +0.25 overhead, asym throughout
+        STATS_TAG="_asym1"
+        TB_MIN_DEFAULT=1.250
+        TB_MAX_DEFAULT=4.250
+        ;;
+    *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;
+esac
+
+TB_MIN="${2:-$TB_MIN_DEFAULT}"
+TB_MAX="${3:-$TB_MAX_DEFAULT}"
+TB_STEP="${4:-0.125}"
+
+LAYER_RE="cache/${MODEL}/LayerRE_c4-N128-L2048-Seed0_B${BIT_CANDS}${STATS_TAG}_faster.pkl"
 test -f "$LAYER_RE" || { echo "ERROR: missing $LAYER_RE — run gateway_pull.sh first"; exit 1; }
 
 EXTRA_CONSTR=c2c3
-BIT_CANDS=1,2,3
 
 LOG_DIR=exps/b200_exp_20260522_gemq_pipeline/logs
 mkdir -p "$LOG_DIR"
-LOG="$LOG_DIR/allocate_${SHORT}_$(date +%Y%m%d_%H%M%S).log"
+LOG="$LOG_DIR/allocate_${SHORT}_${QUANT_SCHEME}_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "$LOG") 2>&1
 
-echo "=== model: $MODEL  layer_re: $LAYER_RE ==="
+echo "=== model: $MODEL  scheme: $QUANT_SCHEME  layer_re: $LAYER_RE ==="
+echo "=== bit_cands: $BIT_CANDS  bit_cost: ${BIT_COST:-auto} ==="
 echo "=== tb sweep: [$TB_MIN, $TB_MAX] step=$TB_STEP (effective bits) ==="
 
-# Step 1 — global ILP at three target effective bpe values
+# Common allocator args
+COMMON_ARGS=(
+    --model_name "$MODEL"
+    --layer_re_path "$LAYER_RE"
+    --budget_kind effective
+    --bit_candidates "$BIT_CANDS"
+    --extra_constr "$EXTRA_CONSTR"
+    --ilp_solver gemq
+)
+if [[ -n "$BIT_COST" ]]; then
+    COMMON_ARGS+=(--bit_cost "$BIT_COST")
+fi
+
+# Step 1 — global ILP
 if [[ "${SKIP_GLOBAL:-0}" != "1" ]]; then
     for BPE in 1.5 2.0 2.5; do
         echo
         echo "[global] target effective bpe = $BPE"
         .venv/bin/python -m gemq.allocate_bits \
-            --model_name "$MODEL" \
-            --layer_re_path "$LAYER_RE" \
-            --mode global --budget_kind effective \
-            --bit_budget "$BPE" \
-            --bit_candidates "$BIT_CANDS" \
-            --extra_constr "$EXTRA_CONSTR" \
-            --ilp_solver gemq
+            "${COMMON_ARGS[@]}" \
+            --mode global --bit_budget "$BPE"
     done
 fi
 
-# Step 2 — per-block ILP sweep (effective bits)
+# Step 2 — per-block sweep
 echo
 echo "[per_block] sweeping tb=$TB_MIN..$TB_MAX step=$TB_STEP"
 .venv/bin/python -m gemq.allocate_bits \
-    --model_name "$MODEL" \
-    --layer_re_path "$LAYER_RE" \
-    --mode per_block --budget_kind effective \
-    --tb_min "$TB_MIN" --tb_max "$TB_MAX" --tb_step "$TB_STEP" \
-    --bit_candidates "$BIT_CANDS" \
-    --extra_constr "$EXTRA_CONSTR" \
-    --ilp_solver gemq
+    "${COMMON_ARGS[@]}" \
+    --mode per_block \
+    --tb_min "$TB_MIN" --tb_max "$TB_MAX" --tb_step "$TB_STEP"
 
 echo
 echo "=== outputs ==="

@@ -24,24 +24,47 @@ Two kinds of solutions:
    `tb`) produces an `{expert_idx: bit}` assignment.
 
 "Effective bits" is **per-bit**, not a single scalar offset, because
-GEMQ's 1-bit quantizer is **symmetric** (`scales = mean(|x|)*2`, zero is
-the constant 0.5, no zero stored) while the 2/3/4-bit paths are
-**asymmetric** (both scale and zero per group). At `groupsize=128` with
-fp16 scale and (where applicable) fp16 zero, the per-weight effective
-cost is:
+GEMQ's default 1-bit quantizer is **symmetric** (`scales = mean(|x|)*2`,
+zero is the constant 0.5, no zero stored) while the ≥2-bit paths are
+**asymmetric** (both scale and zero per group). Two presets are
+supported via `QUANT_SCHEME`:
 
-| bit | scheme       | overhead   | effective |
-|-----|--------------|------------|-----------|
+**`QUANT_SCHEME=gemq` (default, paper-faithful):**
+
+| bit | scheme       | overhead       | effective |
+|-----|--------------|----------------|-----------|
 | 1   | symmetric    | 16/128 = 0.125 | **1.125** |
 | 2   | asymmetric   | 32/128 = 0.25  | **2.25**  |
 | 3   | asymmetric   | 32/128 = 0.25  | **3.25**  |
-| 4   | asymmetric   | 32/128 = 0.25  | 4.25      |
 
-The allocator embeds this `bit_cost` mapping directly in the LP budget
-coefficient (`Σ bit_cost[k]·x_ik ≤ tb·N`); the deployed quantizers
-(`gemq/quantizers/rtn.py:binary` and
-`gemq/quantizers/gptq.py:find_params` when `max_int == 1`) confirm the
-symmetric-1-bit convention.
+**`QUANT_SCHEME=mxmoe` (MxMoE-style w{1,2,3,4}g128asym):**
+
+| bit | scheme       | overhead       | effective |
+|-----|--------------|----------------|-----------|
+| 1   | asymmetric   | 32/128 = 0.25  | **1.25**  |
+| 2   | asymmetric   | 32/128 = 0.25  | **2.25**  |
+| 3   | asymmetric   | 32/128 = 0.25  | **3.25**  |
+| 4   | asymmetric   | 32/128 = 0.25  | **4.25**  |
+
+In `mxmoe` mode the `compute_model_stats.py` step passes `--asym_1bit`
+to `MCMoeRTNWeightQuantizer`, so the LayerRE coefficients
+`coef[l][j][1]` are computed with the *same* asymmetric per-group
+scale+zero scheme that the LP then prices at 1.25 effective bits per
+weight — keeping coefficient and budget units consistent. The LayerRE
+pkl is tagged with an `_asym1` suffix so the two schemes don't collide
+in `cache/<model>/`.
+
+The allocator embeds the chosen `bit_cost` mapping directly in the LP
+budget coefficient (`Σ bit_cost[k]·x_ik ≤ tb·N`). The default mapping is
+auto-derived from `--groupsize` using the GEMQ convention; `mxmoe` mode
+overrides it via `--bit_cost "1:1.25,2:2.25,3:3.25,4:4.25"`.
+
+> ⚠️ **Deploy-side gap (mxmoe):** the GPTQ quantizer in
+> `gemq/quantizers/gptq.py:find_params` still hardcodes symmetric 1-bit
+> (the `max_int == 1` branch). For end-to-end MxMoE-style deployment
+> (`gemq.quantize` with a config that contains 1-bit) you also need to
+> patch GPTQ to route 1-bit through the asymmetric path — left as a
+> follow-up since this exp's scope is stats + allocation.
 
 ---
 
@@ -140,9 +163,16 @@ lives at `$B200_ROOT/GEMQ/exps/.../b200_setup.sh` for any reruns.
 B200_ROOT=/NHNHOME/WORKSPACE/0226010285_A/mllab/deokjae
 EXP=$B200_ROOT/GEMQ/exps/b200_exp_20260522_gemq_pipeline
 
+# A. paper-faithful GEMQ scheme (wbits 1,2,3; symmetric 1-bit `binary`)
 for SHORT in mixtral8x7b deepseekv2lite qwen15moe; do
     submit_b200.sh --user "$USER" --ngpus 4 --ncpus 32 \
-        --command "bash $EXP/b200_compute_stats.sh $SHORT $SHA"
+        --command "QUANT_SCHEME=gemq bash $EXP/b200_compute_stats.sh $SHORT $SHA"
+done
+
+# B. (optional, alternative experiment) MxMoE-style w{1,2,3,4}g128_asym
+for SHORT in mixtral8x7b deepseekv2lite qwen15moe; do
+    submit_b200.sh --user "$USER" --ngpus 4 --ncpus 32 \
+        --command "QUANT_SCHEME=mxmoe bash $EXP/b200_compute_stats.sh $SHORT $SHA"
 done
 
 get_b200_queue.sh
@@ -150,8 +180,10 @@ get_b200_queue.sh
 
 Outputs land under
 `$B200_ROOT/GEMQ/cache/<HF_id>/{LayerGrads_*.pt, LayerRE_*.pkl}` and the
-log under `$EXP/logs/stats_<short>_<ts>.log`. The wrappers idempotently
-skip whichever artifact already exists.
+log under `$EXP/logs/stats_<short>_<ts>.log`. The two schemes produce
+**different** LayerRE pkls (filename tagged `_asym1` for `mxmoe`) so
+they don't collide. The wrappers idempotently skip whichever artifact
+already exists.
 
 Walltime budget (rough, B200 4× H200):
 - Mixtral-8x7B: layer_grads ~15 min, layer_re ~25 min (32 layers × 8 experts × 3 bits)
@@ -180,19 +212,34 @@ exceed the free-tier variable limit for the global ILP.
 ```bash
 cd /data_fast/home/deokjae/QUANT_works/GEMQ
 
-# Per model — global ILP @ effective bpe ∈ {1.5, 2.0, 2.5} + per-block sweep
+# A. GEMQ scheme (default): wbits 1,2,3 / bit_cost {1:1.125, 2:2.25, 3:3.25} /
+#    tb sweep [1.125, 3.250] step 0.125
 for SHORT in mixtral8x7b deepseekv2lite qwen15moe; do
-    bash exps/b200_exp_20260522_gemq_pipeline/gateway_allocate.sh $SHORT
+    QUANT_SCHEME=gemq \
+        bash exps/b200_exp_20260522_gemq_pipeline/gateway_allocate.sh $SHORT
+done
+
+# B. MxMoE scheme: wbits 1,2,3,4 / bit_cost {1:1.25, 2:2.25, 3:3.25, 4:4.25} /
+#    tb sweep [1.250, 4.250] step 0.125. REQUIRES the matching `QUANT_SCHEME=mxmoe`
+#    stats run from Phase 2.B.
+for SHORT in mixtral8x7b deepseekv2lite qwen15moe; do
+    QUANT_SCHEME=mxmoe \
+        bash exps/b200_exp_20260522_gemq_pipeline/gateway_allocate.sh $SHORT
 done
 ```
 
-Outputs:
+Outputs (GEMQ scheme):
 
 ```
-configs/<HF_id>/GEMQ/C4-Seed0_Eeff1.500_B1,2,3_c2c3.pkl
-configs/<HF_id>/GEMQ/C4-Seed0_Eeff2.000_B1,2,3_c2c3.pkl
-configs/<HF_id>/GEMQ/C4-Seed0_Eeff2.500_B1,2,3_c2c3.pkl
+configs/<HF_id>/GEMQ/C4-Seed0_Eeff{1.500,2.000,2.500}_B1,2,3_c2c3.pkl
 configs/<HF_id>/PerBlockEff/C4-Seed0_tb1.125-3.250-0.125_B1,2,3_c2c3.pkl
+```
+
+Outputs (MxMoE scheme):
+
+```
+configs/<HF_id>/GEMQ/C4-Seed0_Eeff{1.500,2.000,2.500}_B1,2,3,4_c2c3.pkl
+configs/<HF_id>/PerBlockEff/C4-Seed0_tb1.250-4.250-0.125_B1,2,3,4_c2c3.pkl
 ```
 
 The per-block file is a single dict with this structure (see

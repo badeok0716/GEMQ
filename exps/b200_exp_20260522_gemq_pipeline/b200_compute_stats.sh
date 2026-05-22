@@ -45,7 +45,25 @@ DATASET=c4
 NSAMPLES=128
 SEQLEN=2048
 SEED=0
-WBITS="1,2,3"
+
+# QUANT_SCHEME selects the candidate set + 1-bit symmetry convention. Two presets:
+#   gemq  (default) -- wbits=1,2,3; 1-bit symmetric `binary`; effective {1.125,2.25,3.25}
+#   mxmoe           -- wbits=1,2,3,4; ALL asymmetric per-group scale+zero; effective
+#                      {1.25,2.25,3.25,4.25} (uniform +0.25 overhead at gs=128).
+QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
+case "$QUANT_SCHEME" in
+    gemq)
+        WBITS="1,2,3"
+        STATS_TAG=""       # backward-compatible filename
+        ASYM_FLAG=()
+        ;;
+    mxmoe)
+        WBITS="1,2,3,4"
+        STATS_TAG="_asym1"
+        ASYM_FLAG=(--asym_1bit)
+        ;;
+    *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;
+esac
 
 LOG="$EXP/logs/stats_${SHORT}_$(date +%Y%m%d_%H%M%S).log"
 mkdir -p "$EXP/logs" "$EXP/results"
@@ -53,7 +71,7 @@ exec > >(tee -a "$LOG") 2>&1
 
 echo "=== node: $(hostname) ==="
 nvidia-smi -L || true
-echo "=== model: $MODEL  short=$SHORT  SHA=$SHA ==="
+echo "=== model: $MODEL  short=$SHORT  SHA=$SHA  QUANT_SCHEME=$QUANT_SCHEME  wbits=$WBITS ==="
 echo "=== start: $(date -Iseconds) ==="
 SECONDS=0
 
@@ -65,7 +83,7 @@ echo "=== pinned: $(git rev-parse HEAD) ==="
 uv sync
 
 GRADS_PATH="$REPO/cache/${MODEL}/LayerGrads_${DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}.pt"
-LAYER_RE_PATH="$REPO/cache/${MODEL}/LayerRE_${DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}_B${WBITS}_faster.pkl"
+LAYER_RE_PATH="$REPO/cache/${MODEL}/LayerRE_${DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}_B${WBITS}${STATS_TAG}_faster.pkl"
 
 mkdir -p "$(dirname "$GRADS_PATH")"
 mkdir -p "$(dirname "$LAYER_RE_PATH")"
@@ -105,7 +123,7 @@ else
         --layer_grads_path "$GRADS_PATH" \
         --layer_re_path "$LAYER_RE_PATH" \
         --forward_batch_size "$FORWARD_BSZ" \
-        "${EXTRA[@]}"
+        "${EXTRA[@]}" "${ASYM_FLAG[@]}"
     test -f "$LAYER_RE_PATH" || { echo "ERROR: layer_re not produced"; exit 1; }
 fi
 

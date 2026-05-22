@@ -71,12 +71,18 @@ class RTNWeightQuantizer(nn.Module):
 
 
 class MCMoeRTNWeightQuantizer(nn.Module):
-    def __init__(self, x, nbits, blocksize=128):
+    def __init__(self, x, nbits, blocksize=128, asym_1bit=False):
         super().__init__()
-        
+
         self.x = x.clone()
         self.nbits = nbits
         self.blocksize = blocksize
+        # When True, dispatch wbit=1 through the asymmetric `_quantize` path
+        # (real per-group scale + zero ⇒ effective overhead = 32/groupsize),
+        # matching MxMoE / generic-asym w1g{gs}_asym deployments. Default keeps
+        # GEMQ's paper-faithful symmetric-1-bit `binary` path
+        # (scale only ⇒ overhead = 16/groupsize).
+        self.asym_1bit = asym_1bit
 
     @classmethod
     def binary(cls, x):
@@ -151,7 +157,7 @@ class MCMoeRTNWeightQuantizer(nn.Module):
         return w
 
     @classmethod
-    def normal_quantize(cls, w, blocksize=128, wbit=2):
+    def normal_quantize(cls, w, blocksize=128, wbit=2, asym_1bit=False):
         columns = w.shape[1]
         w_q = torch.zeros_like(w)
         w_q = w_q.to(w.device)
@@ -161,15 +167,17 @@ class MCMoeRTNWeightQuantizer(nn.Module):
 
             W1 = w[:, i1:i2].clone()
             Q1 = torch.zeros_like(W1)
-            if wbit == 1:
-                Q1 = cls.binary(W1)
+            if wbit == 1 and not asym_1bit:
+                Q1 = cls.binary(W1)        # symmetric (paper-faithful GEMQ)
             else:
-                Q1 = cls._quantize(W1, wbit)
-            
+                Q1 = cls._quantize(W1, wbit)  # asymmetric per-group scale+zero
+
             w_q[:, i1:i2] = Q1
         return w_q
 
     def quantize(self):
         if self.nbits == 0:
             return torch.zeros_like(self.x)
-        return MCMoeRTNWeightQuantizer.normal_quantize(self.x, self.blocksize, self.nbits)
+        return MCMoeRTNWeightQuantizer.normal_quantize(
+            self.x, self.blocksize, self.nbits, asym_1bit=self.asym_1bit
+        )

@@ -132,7 +132,7 @@ def get_stats(model, enc, args):
                 quantizers[e][b] = {}
                 for l, lname in enumerate(sublinear_names):
                     m = named_linears[f"{expert_name}.{lname}"]
-                    quantizers[e][b][l] = MCMoeRTNWeightQuantizer(m.weight.data, nbits=b)
+                    quantizers[e][b][l] = MCMoeRTNWeightQuantizer(m.weight.data, nbits=b, asym_1bit=args.asym_1bit)
 
         # compute reconstruction loss of block output caused by quantization (i.e., perturbation)
         layer_quant_loss = defaultdict(dict)
@@ -369,7 +369,7 @@ def compute_faster_layer_re(model, dataloader, args):
                 quantizers[e][b] = {}
                 for l, lname in enumerate(sublinear_names):
                     m = named_linears[f"{expert_name}.{lname}"]
-                    quantizers[e][b][l] = MCMoeRTNWeightQuantizer(m.weight.data, nbits=b)
+                    quantizers[e][b][l] = MCMoeRTNWeightQuantizer(m.weight.data, nbits=b, asym_1bit=args.asym_1bit)
 
         # compute reconstruction errors of block output caused by quantization (perturbation)
         layer_sq_grads = layer_output_grads[i].squeeze(1).double().pow(2).to("cuda")  # (nsamples, seqlen, hidden_size)
@@ -491,6 +491,14 @@ def parse_args():
     parser.add_argument(
         "--blocksize", type=int, default=128,
         help="Blocksize to use for quantization"
+    )
+    parser.add_argument(
+        "--asym_1bit", action="store_true",
+        help="Use the asymmetric path (scale + zero per group) for wbit=1 instead of the "
+             "default GEMQ symmetric `binary` quantizer. Use this when you intend to deploy "
+             "an MxMoE-style w1g128_asym scheme so the LP coefficient table matches the "
+             "deployed scheme. NOTE: the deployed GPTQ path (gemq/quantizers/gptq.py) still "
+             "uses symmetric 1-bit; full MxMoE deployment also needs that patched."
     )
 
     # misc args
