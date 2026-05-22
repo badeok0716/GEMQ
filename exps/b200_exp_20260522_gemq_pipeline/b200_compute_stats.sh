@@ -77,7 +77,14 @@ SECONDS=0
 
 cd "$REPO"
 git fetch origin
-git checkout -- uv.lock || true
+# uv.lock can be (a) tracked-dirty from a previous `uv sync` rewrite, or
+# (b) entirely untracked when the prior SHA didn't ship a lockfile. Either
+# blocks `git checkout $SHA` if the new SHA adds/changes uv.lock. Both are
+# auto-generated so safe to drop.
+git checkout -- uv.lock 2>/dev/null || true
+if [ -f uv.lock ] && ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
+    rm -f uv.lock
+fi
 git checkout "$SHA"
 echo "=== pinned: $(git rev-parse HEAD) ==="
 uv sync

@@ -48,8 +48,14 @@ else
 fi
 
 cd "$REPO"
-# discard any uv-sync-dirtied lock before checkout (see EXECUTION.md §B200 5a)
-git checkout -- uv.lock || true
+# uv.lock can be (a) tracked-dirty from a previous `uv sync` rewrite, or
+# (b) entirely untracked when the prior SHA didn't ship a lockfile. Both
+# block `git checkout $SHA` if the new SHA adds/changes uv.lock (EXECUTION.md
+# §B200 5a/5b). Both are auto-generated so safe to drop.
+git checkout -- uv.lock 2>/dev/null || true
+if [ -f uv.lock ] && ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
+    rm -f uv.lock
+fi
 git checkout "$SHA"
 echo "[setup] now at $(git rev-parse HEAD)"
 
