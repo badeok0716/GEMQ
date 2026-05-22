@@ -1,8 +1,8 @@
 #!/bin/bash
 # Runs ON gateway. sftp the cache/ artefacts (LayerGrads_*.pt + LayerRE_*.pkl)
-# and the B200 stats logs back. The cache layout mirrors the upstream GEMQ:
+# and the B200 stats logs back. Layout mirrors upstream GEMQ:
 #   cache/<model_name>/LayerGrads_*.pt
-#   cache/<model_name>/LayerRE_*.pkl
+#   cache/<model_name>/LayerRE_*.pkl  (one per QUANT_SCHEME — _asym1 tag for mxmoe)
 
 set -euo pipefail
 
@@ -12,7 +12,8 @@ EXP_REL=exps/b200_exp_20260522_gemq_pipeline
 
 cd "$GW_REPO"
 mkdir -p cache "$EXP_REL/logs"
-chmod 777 "$EXP_REL" "$EXP_REL/logs" || true
+# `hosking` (the sftp wrapper user) must be able to write into the receive dirs.
+chmod 777 cache "$EXP_REL" "$EXP_REL/logs" || true
 
 connect_sftp_b200.sh <<EOF
 lcd $GW_REPO
@@ -24,4 +25,4 @@ EOF
 
 echo
 echo "[pull] cache/ now contains:"
-find cache -type f -printf '%p  %s bytes\n' | head -50
+find cache -type f -printf '%p  %s bytes\n' | sort
