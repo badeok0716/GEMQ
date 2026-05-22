@@ -20,12 +20,28 @@ Two kinds of solutions:
    paper's `c2c3` per-layer constraint.
 2. **Per-block solution** — the same GEMQ objective restricted to **one
    block at a time**, swept over a target effective bits-per-expert
-   `tb ∈ [1.25, 3.25]` at 0.125 step (17 points). Each (block `l`, target
+   `tb ∈ [1.125, 3.25]` at 0.125 step (18 points). Each (block `l`, target
    `tb`) produces an `{expert_idx: bit}` assignment.
 
-"Effective bits" includes the per-weight scale+zero overhead of
-group-wise GPTQ at `groupsize=128, fp16` storage: `effective = raw + 32/128
-= raw + 0.25`. The allocator converts effective → raw internally.
+"Effective bits" is **per-bit**, not a single scalar offset, because
+GEMQ's 1-bit quantizer is **symmetric** (`scales = mean(|x|)*2`, zero is
+the constant 0.5, no zero stored) while the 2/3/4-bit paths are
+**asymmetric** (both scale and zero per group). At `groupsize=128` with
+fp16 scale and (where applicable) fp16 zero, the per-weight effective
+cost is:
+
+| bit | scheme       | overhead   | effective |
+|-----|--------------|------------|-----------|
+| 1   | symmetric    | 16/128 = 0.125 | **1.125** |
+| 2   | asymmetric   | 32/128 = 0.25  | **2.25**  |
+| 3   | asymmetric   | 32/128 = 0.25  | **3.25**  |
+| 4   | asymmetric   | 32/128 = 0.25  | 4.25      |
+
+The allocator embeds this `bit_cost` mapping directly in the LP budget
+coefficient (`Σ bit_cost[k]·x_ik ≤ tb·N`); the deployed quantizers
+(`gemq/quantizers/rtn.py:binary` and
+`gemq/quantizers/gptq.py:find_params` when `max_int == 1`) confirm the
+symmetric-1-bit convention.
 
 ---
 
@@ -51,8 +67,12 @@ push):
   `get_all_expert_names`, and a `compute_gate_stats_hook_qwen2moe` so the
   full `compute_model_stats` path supports Qwen1.5-MoE-A2.7B.
 - `gemq/allocate_bits.py` — adds `--mode {global, per_block}`,
-  `--budget_kind {raw, effective}`, `--effective_offset` (default 0.25),
-  and `--tb_min / --tb_max / --tb_step` for the per-block sweep.
+  `--budget_kind {raw, effective}`, `--groupsize` (default 128),
+  `--bit_cost` (optional explicit override of the per-bit effective
+  cost, e.g. `"1:1.125,2:2.25,3:3.25"`; otherwise auto-derived from
+  `groupsize` using GEMQ's symmetric-1-bit + asymmetric-multi-bit
+  convention) and `--tb_min / --tb_max / --tb_step` for the per-block
+  sweep.
 - `gemq/allocation/ilp_solvers.py` — adds `GEMQSolver.build_block_ilp` /
   `solve_block` for per-block ILPs (silent, returns
   `({l: {j: bit}}, objective_value)`).
@@ -172,7 +192,7 @@ Outputs:
 configs/<HF_id>/GEMQ/C4-Seed0_Eeff1.500_B1,2,3_c2c3.pkl
 configs/<HF_id>/GEMQ/C4-Seed0_Eeff2.000_B1,2,3_c2c3.pkl
 configs/<HF_id>/GEMQ/C4-Seed0_Eeff2.500_B1,2,3_c2c3.pkl
-configs/<HF_id>/PerBlockEff/C4-Seed0_tb1.250-3.250-0.125_B1,2,3_c2c3.pkl
+configs/<HF_id>/PerBlockEff/C4-Seed0_tb1.125-3.250-0.125_B1,2,3_c2c3.pkl
 ```
 
 The per-block file is a single dict with this structure (see
@@ -182,15 +202,26 @@ The per-block file is a single dict with this structure (see
 {
   "solutions":  {l: {tb: {expert: bit, ...}}},
   "objectives": {l: {tb: float}},
-  "infeasible": {l: {tb: bool}},
-  "tb_values":  [1.25, 1.375, ..., 3.25],
+  "infeasible": {l: {tb: bool}},   # True when block_budget < min cost (low-tb tail
+                                   #   for DeepSeek-V2-Lite is shared-pinning-bound)
+  "tb_values":  [1.125, 1.25, ..., 3.25],
   "budget_kind": "effective",
-  "effective_offset": 0.25,
+  "bit_cost":   {1: 1.125, 2: 2.25, 3: 3.25},  # per-bit effective storage cost
   "bit_candidates": [1, 2, 3],
   "extra_constr": "c2c3",
   "model_name": "...",
 }
 ```
+
+To recover the deployed average effective bits for layer `l` from the saved
+solution:
+
+```python
+eff_avg_l = sum(payload["bit_cost"][b] for b in payload["solutions"][l][tb].values()) / N_lp
+```
+
+where `N_lp = num_routed + min(1, num_shared)` is the number of LP-internal
+experts per block.
 
 Set `SKIP_GLOBAL=1` to skip the global step if you only need the per-block
 table (or if Gurobi licensing blocks the global ILP for the big models):

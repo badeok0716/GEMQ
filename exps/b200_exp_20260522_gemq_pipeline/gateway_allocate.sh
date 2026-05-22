@@ -1,24 +1,28 @@
 #!/bin/bash
 # Runs ON gateway. After gateway_pull.sh has staged cache/<MODEL>/LayerRE_*.pkl,
 # this script runs:
-#   1) the GEMQ global ILP at bpe ∈ {1.5, 2.0, 2.5} (effective bits)
+#   1) the GEMQ global ILP at effective bpe ∈ {1.5, 2.0, 2.5}
 #   2) the per-block ILP swept over tb ∈ [tb_min, tb_max] at step 0.125 (effective bits)
 #
 # Outputs:
-#   configs/<MODEL>/GEMQ/C4-Seed0_Eeff{T}_B1,2,3_c2c3.pkl              (3 files)
+#   configs/<MODEL>/GEMQ/C4-Seed0_Eeff{T}_B1,2,3_c2c3.pkl                (3 files)
 #   configs/<MODEL>/PerBlockEff/C4-Seed0_tb{lo}-{hi}-{step}_B1,2,3_c2c3.pkl (1 aggregate file)
 #
 # Positional args:
 #   $1  SHORT_NAME ∈ {mixtral8x7b, deepseekv2lite, qwen15moe}
+#   $2  tb_min   (default 1.125 — effective bits/expert at 1-bit symmetric+s, gs=128)
+#   $3  tb_max   (default 3.250 — effective bits/expert at 3-bit asym+s+z, gs=128)
+#   $4  tb_step  (default 0.125)
 #
 # Notes:
-# - The 0.25 offset assumes groupsize=128 with fp16 (scale, zero) per group
-#   ⇒ overhead = 32/128 = 0.25 bits/weight. Change with --effective_offset
-#   if you change groupsize/group dtype.
+# - "Effective bit" = raw bit + (16+16)/groupsize for asymmetric (k>=2), or
+#   16/groupsize for symmetric (k=1, which GEMQ's binary path uses). Default
+#   bit_cost mapping at groupsize=128: {1: 1.125, 2: 2.25, 3: 3.25}.
+#   See gemq/quantizers/rtn.py:binary and gemq/quantizers/gptq.py:find_params
+#   for the symmetric-1-bit + asymmetric-multi-bit convention.
 # - Gurobi: a full license is required for DeepSeek-V2-Lite and Qwen1.5-MoE
 #   global ILP (variable count > free limit). Per-block sub-problems stay
-#   under the free limit. If Gurobi licensing blocks the global step, you
-#   can rerun only the per-block step by passing --skip_global=1.
+#   under the free limit. Skip the global step with `SKIP_GLOBAL=1` if needed.
 
 set -euo pipefail
 
@@ -26,8 +30,8 @@ if [[ $# -lt 1 ]]; then
     echo "usage: $0 <short_name> [tb_min tb_max [tb_step]]"; exit 1
 fi
 SHORT="$1"
-TB_MIN="${2:-1.25}"
-TB_MAX="${3:-3.25}"
+TB_MIN="${2:-1.125}"
+TB_MAX="${3:-3.250}"
 TB_STEP="${4:-0.125}"
 
 case "$SHORT" in

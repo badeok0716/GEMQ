@@ -29,6 +29,7 @@ class GEMQSolver:
         x_space=(1, 2, 3),
         extra_constr="",
         start_layer_idx=0,
+        bit_cost=None,
     ):
         # load weighted layer reconstruction error as coefficients
         with open(layer_re_path, "rb") as file:
@@ -39,10 +40,22 @@ class GEMQSolver:
         self.num_layers = start_layer_idx + self.num_moe_layers
         self.num_experts = len(self.coef[start_layer_idx]) # assume all layers have the same number of experts
         self.num_x = len(x_space)
-        print(f"num_layers: {self.num_layers}, num_experts: {self.num_experts}, x_space: {self.x_space}")
+
+        # Per-bit storage cost coefficient used in the budget constraint.
+        # Default: raw bits (cost[k] = k). For effective bits with groupsize=128 + fp16
+        # scale (and zero, for asymmetric k>=2), pass {1: 1.125, 2: 2.25, 3: 3.25}.
+        # NOTE: this is the *full* per-weight cost incl. overhead, not just the offset.
+        if bit_cost is None:
+            self.bit_cost = {k: float(k) for k in x_space}
+        else:
+            missing = [k for k in x_space if k not in bit_cost]
+            if missing:
+                raise ValueError(f"bit_cost missing keys for: {missing}")
+            self.bit_cost = {k: float(bit_cost[k]) for k in x_space}
+        print(f"num_layers: {self.num_layers}, num_experts: {self.num_experts}, x_space: {self.x_space}, bit_cost: {self.bit_cost}")
 
         self.extra_constr = extra_constr
-        
+
         self.start_layer_idx = start_layer_idx
 
     def add_constraints_c2c3(self, m: gp.Model, vars):
@@ -85,7 +98,7 @@ class GEMQSolver:
 
         m.addConstr(
             sum(
-                vars[i, j, k] * k
+                vars[i, j, k] * self.bit_cost[k]
                 for i in range(self.start_layer_idx, self.num_layers)
                 for j in range(self.num_experts)
                 for k in self.x_space
@@ -152,7 +165,9 @@ class GEMQSolver:
 
         Args:
             layer_idx: absolute block index in self.coef (must be >= start_layer_idx)
-            total_bits: raw-bit budget for the experts inside this block
+            total_bits: budget for the experts inside this block, expressed in the
+                same units as `self.bit_cost` (raw bits by default; effective bits
+                including group scale/zero overhead if `bit_cost` was set).
         Returns:
             gp.Model with binary x[j, k] for j in experts, k in x_space
         """
@@ -172,9 +187,10 @@ class GEMQSolver:
             GRB.MINIMIZE,
         )
 
-        # budget
+        # budget — uses per-bit cost (= k for raw mode; k + overhead[k] for effective)
         m.addConstr(
-            sum(vars[j, k] * k for j in range(self.num_experts) for k in self.x_space) <= total_bits,
+            sum(vars[j, k] * self.bit_cost[k]
+                for j in range(self.num_experts) for k in self.x_space) <= total_bits,
             name="b0",
         )
 
@@ -190,7 +206,10 @@ class GEMQSolver:
         # at the boundary (one expert at highest, one at 2nd-highest, rest at lowest).
         if self.extra_constr == "c2c3":
             bits = sorted(self.x_space, reverse=True)
-            joint_min = bits[0] + bits[1] + (self.num_experts - 2) * bits[-1]
+            joint_min = (
+                self.bit_cost[bits[0]] + self.bit_cost[bits[1]]
+                + (self.num_experts - 2) * self.bit_cost[bits[-1]]
+            )
             if total_bits >= joint_min - 1e-9:
                 m.addConstr(sum(vars[j, bits[1]] for j in range(self.num_experts)) >= 1, name="b2")
                 m.addConstr(sum(vars[j, bits[0]] for j in range(self.num_experts)) >= 1, name="b3")
