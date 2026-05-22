@@ -51,6 +51,8 @@ case "$QUANT_SCHEME" in
         STATS_TAG=""
         TB_MIN_DEFAULT=1.125
         TB_MAX_DEFAULT=3.250
+        # Global ILP targets (effective bpe). 9 values, 0.125 step in [1.5, 2.5].
+        GLOBAL_BPE="1.5 1.625 1.75 1.875 2.0 2.125 2.25 2.375 2.5"
         ;;
     mxmoe)
         BIT_CANDS="1,2,3,4"
@@ -58,6 +60,8 @@ case "$QUANT_SCHEME" in
         STATS_TAG="_asym1"
         TB_MIN_DEFAULT=1.250
         TB_MAX_DEFAULT=4.250
+        # Global ILP targets (effective bpe). 3 values: 2-bit / 2.5-bit / 3-bit centroids.
+        GLOBAL_BPE="2.25 2.75 3.25"
         ;;
     *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;
 esac
@@ -78,7 +82,8 @@ exec > >(tee -a "$LOG") 2>&1
 
 echo "=== model: $MODEL  scheme: $QUANT_SCHEME  layer_re: $LAYER_RE ==="
 echo "=== bit_cands: $BIT_CANDS  bit_cost: ${BIT_COST:-auto} ==="
-echo "=== tb sweep: [$TB_MIN, $TB_MAX] step=$TB_STEP (effective bits) ==="
+echo "=== global bpe targets (effective): $GLOBAL_BPE ==="
+echo "=== per-block tb sweep: [$TB_MIN, $TB_MAX] step=$TB_STEP (effective bits) ==="
 
 # Common allocator args
 COMMON_ARGS=(
@@ -93,9 +98,9 @@ if [[ -n "$BIT_COST" ]]; then
     COMMON_ARGS+=(--bit_cost "$BIT_COST")
 fi
 
-# Step 1 — global ILP
+# Step 1 — global ILP (per-scheme BPE list set above)
 if [[ "${SKIP_GLOBAL:-0}" != "1" ]]; then
-    for BPE in 1.5 2.0 2.5; do
+    for BPE in $GLOBAL_BPE; do
         echo
         echo "[global] target effective bpe = $BPE"
         .venv/bin/python -m gemq.allocate_bits \
