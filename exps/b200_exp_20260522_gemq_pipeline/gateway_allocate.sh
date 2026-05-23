@@ -51,7 +51,7 @@ case "$QUANT_SCHEME" in
         BIT_COST=""                            # auto-derived: {1:1.125, 2:2.25, 3:3.25} (sym 1-bit)
         STATS_TAG="_rot42"                       # matches b200_compute_stats.sh gemq branch
         CALIB_DATASET=wikitext2
-        NSAMPLES=128
+        NSAMPLES=64
         SEQLEN=4096
         TB_MIN_DEFAULT=1.125
         TB_MAX_DEFAULT=3.250
@@ -63,7 +63,7 @@ case "$QUANT_SCHEME" in
         BIT_COST="1:1.25,2:2.25,3:3.25,4:4.25"  # uniform +0.25 overhead, asym throughout
         STATS_TAG="_asym1_rot42"                 # matches b200_compute_stats.sh mxmoe branch
         CALIB_DATASET=wikitext2
-        NSAMPLES=128
+        NSAMPLES=64
         SEQLEN=4096
         TB_MIN_DEFAULT=1.250
         TB_MAX_DEFAULT=4.250

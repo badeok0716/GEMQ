@@ -63,7 +63,7 @@ case "$QUANT_SCHEME" in
         GRADS_TAG="_rot42"
         ASYM_FLAG=(--rotate --rotation_seed 42)
         CALIB_DATASET=wikitext2
-        NSAMPLES=128
+        NSAMPLES=64
         SEQLEN=4096
         # MxMoE.quant.rotation imports — needs PYTHONPATH to MxMoE repo.
         export PYTHONPATH="$B200_ROOT/MxMoE:${PYTHONPATH:-}"
@@ -74,7 +74,7 @@ case "$QUANT_SCHEME" in
         GRADS_TAG="_rot42"            # grads depend on rotation; bits/asym irrelevant
         ASYM_FLAG=(--asym_1bit --rotate --rotation_seed 42)
         CALIB_DATASET=wikitext2
-        NSAMPLES=128
+        NSAMPLES=64
         SEQLEN=4096
         # MxMoE.quant.rotation imports — needs PYTHONPATH to MxMoE repo.
         export PYTHONPATH="$B200_ROOT/MxMoE:${PYTHONPATH:-}"
