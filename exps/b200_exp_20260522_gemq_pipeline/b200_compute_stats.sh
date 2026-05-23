@@ -149,7 +149,7 @@ else
         --calib_dataset "$CALIB_DATASET" --seed "$SEED" \
         --nsamples "$NSAMPLES" --seqlen "$SEQLEN" \
         --layer_grads_path "$GRADS_PATH" \
-        "${EXTRA[@]}"
+        "${EXTRA[@]}" "${ASYM_FLAG[@]}"
     test -f "$GRADS_PATH" || { echo "ERROR: layer_grads not produced"; exit 1; }
 fi
 
