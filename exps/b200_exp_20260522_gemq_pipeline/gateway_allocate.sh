@@ -60,7 +60,7 @@ case "$QUANT_SCHEME" in
     mxmoe)
         BIT_CANDS="1,2,3,4"
         BIT_COST="1:1.25,2:2.25,3:3.25,4:4.25"  # uniform +0.25 overhead, asym throughout
-        STATS_TAG="_asym1"
+        STATS_TAG="_asym1_rot42"                 # matches b200_compute_stats.sh mxmoe branch
         CALIB_DATASET=wikitext2
         NSAMPLES=128
         SEQLEN=4096

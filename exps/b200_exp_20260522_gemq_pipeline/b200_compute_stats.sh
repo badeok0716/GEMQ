@@ -63,11 +63,13 @@ case "$QUANT_SCHEME" in
         ;;
     mxmoe)
         WBITS="1,2,3,4"
-        STATS_TAG="_asym1"
-        ASYM_FLAG=(--asym_1bit)
+        STATS_TAG="_asym1_rot42"
+        ASYM_FLAG=(--asym_1bit --rotate --rotation_seed 42)
         CALIB_DATASET=wikitext2
         NSAMPLES=128
         SEQLEN=4096
+        # MxMoE.quant.rotation imports — needs PYTHONPATH to MxMoE repo.
+        export PYTHONPATH="$B200_ROOT/MxMoE:${PYTHONPATH:-}"
         ;;
     *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;
 esac

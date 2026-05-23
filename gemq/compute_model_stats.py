@@ -500,6 +500,22 @@ def parse_args():
              "deployed scheme. NOTE: the deployed GPTQ path (gemq/quantizers/gptq.py) still "
              "uses symmetric 1-bit; full MxMoE deployment also needs that patched."
     )
+    parser.add_argument(
+        "--rotate", action="store_true",
+        help="Apply MxMoE's gptq-had Hadamard pre-rotation to the model before any stats "
+             "are captured (mirrors gmpq-moe/ours/runners.py:_apply_rotation). Requires "
+             "PYTHONPATH=<MxMoE repo> at job startup; calls "
+             "`mxmoe.quant.rotation.ModelRotator(model, 'hadamard').rotate_model(model, "
+             "enable_online_rotation=True)`. Seeds python/numpy/torch with --rotation_seed "
+             "(default 42, matching MxMoE's CLI default) so the ±1 diagonal in "
+             "`random_hadamard_matrix` is reproducible. NOTE: fuse_layer_norms is called "
+             "as part of rotation, which hardcodes RMSNorm eps to 1e-6 (a noise-level "
+             "shift on hidden ≥ 2048 production models)."
+    )
+    parser.add_argument(
+        "--rotation_seed", type=int, default=42,
+        help="Seed for MxMoE's random_hadamard_matrix when --rotate is set."
+    )
 
     # misc args
     parser.add_argument(
@@ -534,7 +550,32 @@ if __name__ == "__main__":
         torch_dtype=args.model_dtype, attn_implementation=args.attn_impl, trust_remote_code=True,
     )
     model.seqlen = args.seqlen
-    
+
+    # MxMoE-style Hadamard rotation. Must run BEFORE any stats capture so the
+    # gradient extraction (--mode layer_grads) and the per-expert quant-error
+    # measurement (--mode layer_re) both see the rotated weights / activations.
+    if args.rotate:
+        import random as _py_random
+        import numpy as _np
+        _py_random.seed(args.rotation_seed)
+        _np.random.seed(args.rotation_seed)
+        torch.manual_seed(args.rotation_seed)
+        torch.cuda.manual_seed_all(args.rotation_seed)
+
+        from mxmoe.quant.rotation import ModelRotator
+        rotator = ModelRotator(
+            model,
+            rotation_mode="hadamard",
+            dev=torch.device("cuda:0"),
+        )
+        hooks = rotator.rotate_model(model, enable_online_rotation=True)
+        # Keep hook handles alive for the model's lifetime so every downstream
+        # forward (layer_grads backward / layer_re forward) sees the online
+        # Hadamard on `down_proj`. Matches gmpq-moe/ours/runners.py:247.
+        model._gemq_online_had_hooks = hooks
+        print(f"[rotate] applied Hadamard rotation with seed={args.rotation_seed}, "
+              f"online_had_hooks={len(hooks)}")
+
     if args.mode == "layer_grads":
         model.train()
     else:

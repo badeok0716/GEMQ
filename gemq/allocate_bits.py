@@ -22,6 +22,14 @@ def auto_parse_filename(layer_re_path):
     else:
         raise ValueError(f"Cannot parse calibration dataset from layer_re_path: {layer_re_path}")
 
+    # MxMoE Hadamard rotation tag — `_rot<seed>` injected by the
+    # b200_compute_stats.sh mxmoe branch when --rotate is set. We surface it
+    # in the output config prefix so rotated vs non-rotated configs never
+    # collide in `configs/<model>/{GEMQ,PerBlockEff}/`.
+    rot_match = re.search(r'_rot(\d+)', layer_re_path)
+    if rot_match:
+        calib_str += f"-rot{rot_match.group(1)}"
+
     # extract seed number from layer_re_path
     match = re.search(r'Seed(\d+)', layer_re_path)
     seed_num = match.group(1) if match else "00"

@@ -80,4 +80,41 @@ if [[ ! -f "$C4_FILE" ]]; then
     ls -lh c4-train.00000-of-01024.json
 fi
 
+# 4) fast-hadamard-transform — required for the MxMoE Hadamard rotation
+# (`compute_model_stats.py --rotate`). Build for Python 3.10 / torch 2.12
+# from MxMoE's vendored submodule. The pre-built .so under MxMoE's source
+# dir is cpython-311 (its own venv); cpython-310 has a distinct filename
+# so coexists without overwrite.
+MXMOE_FHT_SRC=$B200_ROOT/MxMoE/mxmoe/3rdparty/fast-hadamard-transform
+cd "$REPO"
+if .venv/bin/python -c "import fast_hadamard_transform" 2>/dev/null; then
+    echo "[setup] fast_hadamard_transform already importable, skipping build"
+else
+    if [[ ! -d "$MXMOE_FHT_SRC/fast_hadamard_transform" ]]; then
+        echo "ERROR: $MXMOE_FHT_SRC submodule not initialized — abort"
+        exit 1
+    fi
+    # locate nvcc; B200 GPU node should expose it via PATH or /usr/local/cuda
+    if command -v nvcc >/dev/null 2>&1; then
+        export CUDA_HOME=$(dirname "$(dirname "$(command -v nvcc)")")
+    elif [[ -e /usr/local/cuda/bin/nvcc ]]; then
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=$CUDA_HOME/bin:$PATH
+    fi
+    command -v nvcc >/dev/null 2>&1 || { echo "ERROR: nvcc not on PATH (CUDA_HOME=$CUDA_HOME)"; exit 1; }
+    echo "[setup] CUDA_HOME=$CUDA_HOME nvcc=$(command -v nvcc) version=$(nvcc --version | tail -1)"
+
+    # Build non-editable so MxMoE's existing editable install is untouched.
+    # --no-build-isolation lets the build see GEMQ venv's torch.
+    uv pip install --no-build-isolation "$MXMOE_FHT_SRC"
+
+    # smoke-test
+    .venv/bin/python - <<'PY'
+import torch, fast_hadamard_transform as fht
+x = torch.randn(2, 128, device="cuda")
+y = fht.hadamard_transform(x.contiguous(), 1.0/torch.tensor(128.0).sqrt())
+print(f"[setup] fast_hadamard_transform OK: {y.shape} {y.dtype}")
+PY
+fi
+
 echo "[setup] DONE — pinned $(git -C "$REPO" rev-parse HEAD)"
