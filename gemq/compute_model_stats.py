@@ -516,6 +516,15 @@ def parse_args():
         "--rotation_seed", type=int, default=42,
         help="Seed for MxMoE's random_hadamard_matrix when --rotate is set."
     )
+    parser.add_argument(
+        "--online_had", action="store_true",
+        help="When --rotate is set, also attach the online Hadamard pre-hook on "
+             "each down_proj (extra rotation applied during every forward). "
+             "Default OFF to match MxMoE's paper Table 1 sweep "
+             "(`baseline_reprd/.../sweep.py: online_had=False`) and gmpq-moe's "
+             "`mxmoe_setting.yaml: online_had: false`. Turn ON only when "
+             "ablating against the online-Hadamard variant."
+    )
 
     # misc args
     parser.add_argument(
@@ -568,13 +577,12 @@ if __name__ == "__main__":
             rotation_mode="hadamard",
             dev=torch.device("cuda:0"),
         )
-        hooks = rotator.rotate_model(model, enable_online_rotation=True)
-        # Keep hook handles alive for the model's lifetime so every downstream
-        # forward (layer_grads backward / layer_re forward) sees the online
-        # Hadamard on `down_proj`. Matches gmpq-moe/ours/runners.py:247.
+        hooks = rotator.rotate_model(model, enable_online_rotation=args.online_had)
+        # Keep hook handles alive (only populated if online_had=True). Matches
+        # gmpq-moe/ours/runners.py:247.
         model._gemq_online_had_hooks = hooks
         print(f"[rotate] applied Hadamard rotation with seed={args.rotation_seed}, "
-              f"online_had_hooks={len(hooks)}")
+              f"online_had={args.online_had}, hooks={len(hooks)}")
 
     if args.mode == "layer_grads":
         model.train()
