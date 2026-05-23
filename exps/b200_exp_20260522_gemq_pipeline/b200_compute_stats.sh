@@ -60,6 +60,7 @@ case "$QUANT_SCHEME" in
     gemq)
         WBITS="1,2,3"
         STATS_TAG=""           # backward-compatible filename
+        GRADS_TAG=""
         ASYM_FLAG=()
         CALIB_DATASET=c4
         NSAMPLES=128
@@ -68,6 +69,7 @@ case "$QUANT_SCHEME" in
     mxmoe)
         WBITS="1,2,3,4"
         STATS_TAG="_asym1_rot42"
+        GRADS_TAG="_rot42"            # grads depend on rotation; bits/asym irrelevant
         ASYM_FLAG=(--asym_1bit --rotate --rotation_seed 42)
         CALIB_DATASET=wikitext2
         NSAMPLES=128
@@ -122,7 +124,7 @@ else
     .venv/bin/python -c "import fast_hadamard_transform; print('[ensure-fht] re-install OK')"
 fi
 
-GRADS_PATH="$REPO/cache/${MODEL}/LayerGrads_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}.pt"
+GRADS_PATH="$REPO/cache/${MODEL}/LayerGrads_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}${GRADS_TAG}.pt"
 LAYER_RE_PATH="$REPO/cache/${MODEL}/LayerRE_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}_B${WBITS}${STATS_TAG}_faster.pkl"
 
 mkdir -p "$(dirname "$GRADS_PATH")"
