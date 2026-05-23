@@ -140,6 +140,7 @@ fi
 
 echo
 echo "[step1] layer_grads (full-precision backward; uses device_map='auto')"
+echo "[step1] extra args: EXTRA=(${EXTRA[*]:-})  ASYM_FLAG=(${ASYM_FLAG[*]:-})"
 if [[ -f "$GRADS_PATH" ]]; then
     echo "  -> already present, skipping: $GRADS_PATH"
 else
