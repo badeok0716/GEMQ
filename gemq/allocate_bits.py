@@ -13,6 +13,8 @@ def auto_parse_filename(layer_re_path):
     calib_str = ""
     if "math+c4" in layer_re_path:
         calib_str = "MATH+C4"
+    elif "wikitext2" in layer_re_path:
+        calib_str = "WT2"
     elif "c4" in layer_re_path:
         calib_str = "C4"
     elif "math" in layer_re_path:

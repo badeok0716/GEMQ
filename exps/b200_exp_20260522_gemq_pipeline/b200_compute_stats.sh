@@ -41,26 +41,33 @@ export HF_HOME=$B200_ROOT/hf_cache
 
 REPO=$B200_ROOT/GEMQ
 EXP=$REPO/exps/b200_exp_20260522_gemq_pipeline
-DATASET=c4
-NSAMPLES=128
-SEQLEN=2048
 SEED=0
 
-# QUANT_SCHEME selects the candidate set + 1-bit symmetry convention. Two presets:
-#   gemq  (default) -- wbits=1,2,3; 1-bit symmetric `binary`; effective {1.125,2.25,3.25}
-#   mxmoe           -- wbits=1,2,3,4; ALL asymmetric per-group scale+zero; effective
-#                      {1.25,2.25,3.25,4.25} (uniform +0.25 overhead at gs=128).
+# QUANT_SCHEME selects the candidate set + 1-bit symmetry convention + calib data:
+#   gemq  (default, paper-faithful)
+#       wbits=1,2,3; 1-bit symmetric `binary`; effective {1.125,2.25,3.25}
+#       calib: c4 train shard 0, 128 sequences × 2048 tokens
+#   mxmoe (asym-throughout, paper Tab 1 MxMoE convention)
+#       wbits=1,2,3,4; ALL asymmetric per-group scale+zero;
+#       effective {1.25,2.25,3.25,4.25} (uniform +0.25 overhead at gs=128).
+#       calib: wikitext2 train, 256 sequences × 4096 tokens
 QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
 case "$QUANT_SCHEME" in
     gemq)
         WBITS="1,2,3"
-        STATS_TAG=""       # backward-compatible filename
+        STATS_TAG=""           # backward-compatible filename
         ASYM_FLAG=()
+        CALIB_DATASET=c4
+        NSAMPLES=128
+        SEQLEN=2048
         ;;
     mxmoe)
         WBITS="1,2,3,4"
         STATS_TAG="_asym1"
         ASYM_FLAG=(--asym_1bit)
+        CALIB_DATASET=wikitext2
+        NSAMPLES=256
+        SEQLEN=4096
         ;;
     *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;
 esac
@@ -91,8 +98,8 @@ git checkout -f "$SHA"
 echo "=== pinned: $(git rev-parse HEAD) ==="
 uv sync
 
-GRADS_PATH="$REPO/cache/${MODEL}/LayerGrads_${DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}.pt"
-LAYER_RE_PATH="$REPO/cache/${MODEL}/LayerRE_${DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}_B${WBITS}${STATS_TAG}_faster.pkl"
+GRADS_PATH="$REPO/cache/${MODEL}/LayerGrads_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}.pt"
+LAYER_RE_PATH="$REPO/cache/${MODEL}/LayerRE_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}_B${WBITS}${STATS_TAG}_faster.pkl"
 
 mkdir -p "$(dirname "$GRADS_PATH")"
 mkdir -p "$(dirname "$LAYER_RE_PATH")"
@@ -111,7 +118,7 @@ else
     uv run python -m gemq.compute_model_stats \
         --mode layer_grads \
         --model "$MODEL" --model_name "$MODEL" \
-        --calib_dataset "$DATASET" --seed "$SEED" \
+        --calib_dataset "$CALIB_DATASET" --seed "$SEED" \
         --nsamples "$NSAMPLES" --seqlen "$SEQLEN" \
         --layer_grads_path "$GRADS_PATH" \
         "${EXTRA[@]}"
@@ -126,7 +133,7 @@ else
     uv run python -m gemq.compute_model_stats \
         --mode layer_re \
         --model "$MODEL" --model_name "$MODEL" \
-        --calib_dataset "$DATASET" --seed "$SEED" \
+        --calib_dataset "$CALIB_DATASET" --seed "$SEED" \
         --nsamples "$NSAMPLES" --seqlen "$SEQLEN" \
         --wbits "$WBITS" \
         --layer_grads_path "$GRADS_PATH" \

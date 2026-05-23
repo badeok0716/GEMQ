@@ -49,6 +49,9 @@ case "$QUANT_SCHEME" in
         BIT_CANDS="1,2,3"
         BIT_COST=""                            # auto-derived: {1:1.125, 2:2.25, 3:3.25}
         STATS_TAG=""
+        CALIB_DATASET=c4
+        NSAMPLES=128
+        SEQLEN=2048
         TB_MIN_DEFAULT=1.125
         TB_MAX_DEFAULT=3.250
         # Global ILP targets (effective bpe). 9 values, 0.125 step in [1.5, 2.5].
@@ -58,6 +61,9 @@ case "$QUANT_SCHEME" in
         BIT_CANDS="1,2,3,4"
         BIT_COST="1:1.25,2:2.25,3:3.25,4:4.25"  # uniform +0.25 overhead, asym throughout
         STATS_TAG="_asym1"
+        CALIB_DATASET=wikitext2
+        NSAMPLES=256
+        SEQLEN=4096
         TB_MIN_DEFAULT=1.250
         TB_MAX_DEFAULT=4.250
         # Global ILP targets (effective bpe). 3 values: 2-bit / 2.5-bit / 3-bit centroids.
@@ -70,7 +76,7 @@ TB_MIN="${2:-$TB_MIN_DEFAULT}"
 TB_MAX="${3:-$TB_MAX_DEFAULT}"
 TB_STEP="${4:-0.125}"
 
-LAYER_RE="cache/${MODEL}/LayerRE_c4-N128-L2048-Seed0_B${BIT_CANDS}${STATS_TAG}_faster.pkl"
+LAYER_RE="cache/${MODEL}/LayerRE_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed0_B${BIT_CANDS}${STATS_TAG}_faster.pkl"
 test -f "$LAYER_RE" || { echo "ERROR: missing $LAYER_RE — run gateway_pull.sh first"; exit 1; }
 
 EXTRA_CONSTR=c2c3
