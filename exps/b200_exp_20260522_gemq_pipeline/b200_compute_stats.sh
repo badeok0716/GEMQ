@@ -104,6 +104,24 @@ git checkout -f "$SHA"
 echo "=== pinned: $(git rev-parse HEAD) ==="
 uv sync
 
+# `uv sync` removes packages not in uv.lock; fast-hadamard-transform is
+# installed outside the lock (built from MxMoE 3rdparty), so it gets purged
+# on every sync. Re-install (idempotent — import-check skips when present).
+if .venv/bin/python -c "import fast_hadamard_transform" 2>/dev/null; then
+    echo "[ensure-fht] fast_hadamard_transform present"
+else
+    echo "[ensure-fht] fast_hadamard_transform missing — re-installing from MxMoE 3rdparty"
+    MXMOE_FHT_SRC=$B200_ROOT/MxMoE/mxmoe/3rdparty/fast-hadamard-transform
+    if command -v nvcc >/dev/null 2>&1; then
+        export CUDA_HOME=$(dirname "$(dirname "$(command -v nvcc)")")
+    elif [[ -e /usr/local/cuda/bin/nvcc ]]; then
+        export CUDA_HOME=/usr/local/cuda
+        export PATH=$CUDA_HOME/bin:$PATH
+    fi
+    uv pip install --no-build-isolation "$MXMOE_FHT_SRC"
+    .venv/bin/python -c "import fast_hadamard_transform; print('[ensure-fht] re-install OK')"
+fi
+
 GRADS_PATH="$REPO/cache/${MODEL}/LayerGrads_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}.pt"
 LAYER_RE_PATH="$REPO/cache/${MODEL}/LayerRE_${CALIB_DATASET}-N${NSAMPLES}-L${SEQLEN}-Seed${SEED}_B${WBITS}${STATS_TAG}_faster.pkl"
 
