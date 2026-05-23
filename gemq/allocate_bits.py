@@ -143,6 +143,10 @@ def run_gemq_solver_global(args):
         bit_cost=bit_cost,
     )
     opt_set = solver.solve_all(total_bits=total_bits)
+    if opt_set is None:
+        print(f"[global] Skipping save: bpe={args.bit_budget} ({args.budget_kind}) infeasible "
+              f"or unsolved. Try a larger budget or drop --extra_constr.")
+        return
 
     save_path = args.save_path
     if not save_path:

@@ -98,14 +98,16 @@ if [[ -n "$BIT_COST" ]]; then
     COMMON_ARGS+=(--bit_cost "$BIT_COST")
 fi
 
-# Step 1 — global ILP (per-scheme BPE list set above)
+# Step 1 — global ILP (per-scheme BPE list set above).
+# `|| true` so an infeasible bpe (e.g. tight c2c3 at low bpe for small-expert
+# models like Mixtral) doesn't abort the rest of the sweep under `set -e`.
 if [[ "${SKIP_GLOBAL:-0}" != "1" ]]; then
     for BPE in $GLOBAL_BPE; do
         echo
         echo "[global] target effective bpe = $BPE"
         .venv/bin/python -m gemq.allocate_bits \
             "${COMMON_ARGS[@]}" \
-            --mode global --bit_budget "$BPE"
+            --mode global --bit_budget "$BPE" || true
     done
 fi
 

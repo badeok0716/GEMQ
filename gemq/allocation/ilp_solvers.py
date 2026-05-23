@@ -134,6 +134,13 @@ class GEMQSolver:
             m = self.build_ilp(total_bits)
             m.optimize()
 
+            if m.Status != GRB.OPTIMAL:
+                print(f"[global] LP non-optimal (status={m.Status}); budget={total_bits} "
+                      f"likely too tight for c2c3 / candidate set. Returning None.")
+                m.dispose()
+                gp.disposeDefaultEnv()
+                return None
+
             opt_set = {}
             for v in m.getVars():
                 if v.X > 1e-6:
@@ -150,12 +157,8 @@ class GEMQSolver:
             gp.disposeDefaultEnv()
 
         except gp.GurobiError as e:
-            print(f"Error code {e.errno}: {e}")
-            exit(1)
-
-        except AttributeError:
-            print("Encountered an attribute error")
-            exit(1)
+            print(f"[global] Gurobi error code {e.errno}: {e}")
+            return None
 
         return opt_set
 
