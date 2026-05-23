@@ -66,7 +66,7 @@ case "$QUANT_SCHEME" in
         STATS_TAG="_asym1"
         ASYM_FLAG=(--asym_1bit)
         CALIB_DATASET=wikitext2
-        NSAMPLES=256
+        NSAMPLES=128
         SEQLEN=4096
         ;;
     *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;

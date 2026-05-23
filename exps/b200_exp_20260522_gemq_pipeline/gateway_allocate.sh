@@ -62,7 +62,7 @@ case "$QUANT_SCHEME" in
         BIT_COST="1:1.25,2:2.25,3:3.25,4:4.25"  # uniform +0.25 overhead, asym throughout
         STATS_TAG="_asym1"
         CALIB_DATASET=wikitext2
-        NSAMPLES=256
+        NSAMPLES=128
         SEQLEN=4096
         TB_MIN_DEFAULT=1.250
         TB_MAX_DEFAULT=4.250
