@@ -48,11 +48,11 @@ QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
 case "$QUANT_SCHEME" in
     gemq)
         BIT_CANDS="1,2,3"
-        BIT_COST=""                            # auto-derived: {1:1.125, 2:2.25, 3:3.25}
-        STATS_TAG=""
-        CALIB_DATASET=c4
+        BIT_COST=""                            # auto-derived: {1:1.125, 2:2.25, 3:3.25} (sym 1-bit)
+        STATS_TAG="_rot42"                       # matches b200_compute_stats.sh gemq branch
+        CALIB_DATASET=wikitext2
         NSAMPLES=128
-        SEQLEN=2048
+        SEQLEN=4096
         TB_MIN_DEFAULT=1.125
         TB_MAX_DEFAULT=3.250
         # Global ILP targets (effective bpe). 9 values, 0.125 step in [1.5, 2.5].

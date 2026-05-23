@@ -59,12 +59,14 @@ QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
 case "$QUANT_SCHEME" in
     gemq)
         WBITS="1,2,3"
-        STATS_TAG=""           # backward-compatible filename
-        GRADS_TAG=""
-        ASYM_FLAG=()
-        CALIB_DATASET=c4
+        STATS_TAG="_rot42"            # rotation only (no _asym1; sym 1-bit is gemq default)
+        GRADS_TAG="_rot42"
+        ASYM_FLAG=(--rotate --rotation_seed 42)
+        CALIB_DATASET=wikitext2
         NSAMPLES=128
-        SEQLEN=2048
+        SEQLEN=4096
+        # MxMoE.quant.rotation imports — needs PYTHONPATH to MxMoE repo.
+        export PYTHONPATH="$B200_ROOT/MxMoE:${PYTHONPATH:-}"
         ;;
     mxmoe)
         WBITS="1,2,3,4"
