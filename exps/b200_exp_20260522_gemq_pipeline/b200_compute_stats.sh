@@ -25,6 +25,10 @@ case "$SHORT" in
         MODEL="mistralai/Mixtral-8x7B-v0.1"
         FORWARD_BSZ=1
         ;;
+    mixtral8x7b_instruct)
+        MODEL="mistralai/Mixtral-8x7B-Instruct-v0.1"
+        FORWARD_BSZ=1
+        ;;
     deepseekv2lite)
         MODEL="deepseek-ai/DeepSeek-V2-Lite"
         FORWARD_BSZ=8   # smaller model — larger forward batch fits

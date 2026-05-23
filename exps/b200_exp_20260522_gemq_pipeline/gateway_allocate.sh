@@ -35,9 +35,10 @@ fi
 SHORT="$1"
 
 case "$SHORT" in
-    mixtral8x7b)    MODEL="mistralai/Mixtral-8x7B-v0.1" ;;
-    deepseekv2lite) MODEL="deepseek-ai/DeepSeek-V2-Lite" ;;
-    qwen15moe)      MODEL="Qwen/Qwen1.5-MoE-A2.7B" ;;
+    mixtral8x7b)          MODEL="mistralai/Mixtral-8x7B-v0.1" ;;
+    mixtral8x7b_instruct) MODEL="mistralai/Mixtral-8x7B-Instruct-v0.1" ;;
+    deepseekv2lite)       MODEL="deepseek-ai/DeepSeek-V2-Lite" ;;
+    qwen15moe)            MODEL="Qwen/Qwen1.5-MoE-A2.7B" ;;
     *) echo "ERROR: unknown short name $SHORT"; exit 1 ;;
 esac
 
