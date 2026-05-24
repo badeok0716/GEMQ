@@ -67,8 +67,11 @@ case "$QUANT_SCHEME" in
         SEQLEN=4096
         TB_MIN_DEFAULT=1.250
         TB_MAX_DEFAULT=4.250
-        # Global ILP targets (effective bpe). 3 values: 2-bit / 2.5-bit / 3-bit centroids.
-        GLOBAL_BPE="2.25 2.75 3.25"
+        # Global ILP targets (effective bpe). Six values spanning [1.5, 3.25].
+        # Note: Mixtral (N=8 experts/layer) c2c3-joint requires bpe >= 1.875;
+        # 1.5 and 1.75 will be auto-skipped as infeasible for Mixtral but
+        # remain feasible for DSv2 (>= 1.371) / Qwen (>= 1.332).
+        GLOBAL_BPE="1.5 1.75 2.0 2.25 2.75 3.25"
         ;;
     *) echo "ERROR: unknown QUANT_SCHEME=$QUANT_SCHEME"; exit 1 ;;
 esac
