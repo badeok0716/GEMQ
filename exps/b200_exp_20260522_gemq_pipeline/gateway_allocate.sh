@@ -116,6 +116,13 @@ echo "=== global bpe targets (effective): $GLOBAL_BPE ==="
 echo "=== per-block tb sweep: [$TB_MIN, $TB_MAX] step=$TB_STEP (effective bits) ==="
 
 # Common allocator args
+# --correctly_weighted: weight the shared-expert entry in the LP budget by its
+# actual param ratio (ModelInfo.shared_expert_param_ratio — 4.0 for Qwen, 2.0
+# for DSv2, 1.0 otherwise). Without this flag every expert counts as one unit,
+# so for Qwen/DSv2 the achieved numel-weighted bpw overshoots the target.
+# Mixtral (no shared expert) is unaffected — the shared-entry branch in
+# get_expert_weights() is skipped, leaving uniform [1.0]*n_routed weights.
+# Output filenames automatically gain a `_correctly_weighted` suffix.
 COMMON_ARGS=(
     --model_name "$MODEL"
     --layer_re_path "$LAYER_RE"
@@ -123,6 +130,7 @@ COMMON_ARGS=(
     --bit_candidates "$BIT_CANDS"
     --extra_constr "$EXTRA_CONSTR"
     --ilp_solver gemq
+    --correctly_weighted
 )
 if [[ -n "$BIT_COST" ]]; then
     COMMON_ARGS+=(--bit_cost "$BIT_COST")
