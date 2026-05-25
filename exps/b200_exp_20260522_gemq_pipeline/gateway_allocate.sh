@@ -45,11 +45,25 @@ esac
 cd /data_fast/home/deokjae/QUANT_works/GEMQ
 
 QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
+# ROTATION ∈ {on, off}. Must match the rotation tag of the source
+# b200_compute_stats.sh run that produced the LayerRE pkl. ``on``
+# picks the _rot42 LayerRE; ``off`` picks the _norot LayerRE.
+# allocate_bits.auto_parse_filename re-derives the output prefix from the
+# LayerRE filename (``_rot42`` → ``WT2-rot42-Seed0`` / absent → ``WT2-Seed0``),
+# so rotated vs non-rotated outputs land in distinct config filenames
+# automatically — no extra plumbing needed here for collision avoidance.
+ROTATION="${ROTATION:-on}"
 case "$QUANT_SCHEME" in
     gemq)
         BIT_CANDS="1,2,3"
         BIT_COST=""                            # auto-derived: {1:1.125, 2:2.25, 3:3.25} (sym 1-bit)
-        STATS_TAG="_rot42"                       # matches b200_compute_stats.sh gemq branch
+        if [[ "$ROTATION" == "on" ]]; then
+            STATS_TAG="_rot42"                 # matches b200_compute_stats.sh gemq+rot42
+        elif [[ "$ROTATION" == "off" ]]; then
+            STATS_TAG="_norot"                 # matches b200_compute_stats.sh gemq+norot
+        else
+            echo "ERROR: unknown ROTATION=$ROTATION (expected on|off)"; exit 1
+        fi
         CALIB_DATASET=wikitext2
         NSAMPLES=64
         SEQLEN=4096
@@ -61,7 +75,13 @@ case "$QUANT_SCHEME" in
     mxmoe)
         BIT_CANDS="1,2,3,4"
         BIT_COST="1:1.25,2:2.25,3:3.25,4:4.25"  # uniform +0.25 overhead, asym throughout
-        STATS_TAG="_asym1_rot42"                 # matches b200_compute_stats.sh mxmoe branch
+        if [[ "$ROTATION" == "on" ]]; then
+            STATS_TAG="_asym1_rot42"           # matches b200_compute_stats.sh mxmoe+rot42
+        elif [[ "$ROTATION" == "off" ]]; then
+            STATS_TAG="_asym1_norot"           # matches b200_compute_stats.sh mxmoe+norot
+        else
+            echo "ERROR: unknown ROTATION=$ROTATION (expected on|off)"; exit 1
+        fi
         CALIB_DATASET=wikitext2
         NSAMPLES=64
         SEQLEN=4096
