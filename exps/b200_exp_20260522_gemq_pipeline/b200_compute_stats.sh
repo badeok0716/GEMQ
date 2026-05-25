@@ -56,12 +56,27 @@ SEED=0
 #       effective {1.25,2.25,3.25,4.25} (uniform +0.25 overhead at gs=128).
 #       calib: wikitext2 train, 256 sequences × 4096 tokens
 QUANT_SCHEME="${QUANT_SCHEME:-gemq}"
+# ROTATION ∈ {on, off}. "on" (default) keeps the existing GPTQ-HAD
+# pre-pass (--rotate --rotation_seed 42) so coefficients are measured on
+# rotated weights — matching the rot42 cache files. "off" drops both
+# flags so LayerGrads / LayerRE are computed on un-rotated weights; tags
+# switch to _norot to land in distinct cache filenames (no collision
+# with rot42).
+ROTATION="${ROTATION:-on}"
 case "$QUANT_SCHEME" in
     gemq)
         WBITS="1,2,3"
-        STATS_TAG="_rot42"            # rotation only (no _asym1; sym 1-bit is gemq default)
-        GRADS_TAG="_rot42"
-        ASYM_FLAG=(--rotate --rotation_seed 42)
+        if [[ "$ROTATION" == "on" ]]; then
+            STATS_TAG="_rot42"        # rotation only (no _asym1; sym 1-bit is gemq default)
+            GRADS_TAG="_rot42"
+            ASYM_FLAG=(--rotate --rotation_seed 42)
+        elif [[ "$ROTATION" == "off" ]]; then
+            STATS_TAG="_norot"
+            GRADS_TAG="_norot"
+            ASYM_FLAG=()
+        else
+            echo "ERROR: unknown ROTATION=$ROTATION (expected on|off)"; exit 1
+        fi
         CALIB_DATASET=wikitext2
         NSAMPLES=64
         SEQLEN=4096
@@ -70,9 +85,17 @@ case "$QUANT_SCHEME" in
         ;;
     mxmoe)
         WBITS="1,2,3,4"
-        STATS_TAG="_asym1_rot42"
-        GRADS_TAG="_rot42"            # grads depend on rotation; bits/asym irrelevant
-        ASYM_FLAG=(--asym_1bit --rotate --rotation_seed 42)
+        if [[ "$ROTATION" == "on" ]]; then
+            STATS_TAG="_asym1_rot42"
+            GRADS_TAG="_rot42"        # grads depend on rotation; bits/asym irrelevant
+            ASYM_FLAG=(--asym_1bit --rotate --rotation_seed 42)
+        elif [[ "$ROTATION" == "off" ]]; then
+            STATS_TAG="_asym1_norot"
+            GRADS_TAG="_norot"
+            ASYM_FLAG=(--asym_1bit)
+        else
+            echo "ERROR: unknown ROTATION=$ROTATION (expected on|off)"; exit 1
+        fi
         CALIB_DATASET=wikitext2
         NSAMPLES=64
         SEQLEN=4096
