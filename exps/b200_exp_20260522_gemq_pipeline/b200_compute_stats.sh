@@ -16,9 +16,16 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-    echo "usage: $0 <short_name> <SHA>"; exit 1
+    echo "usage: $0 <short_name> <SHA> [rotation:on|off]"; exit 1
 fi
 SHORT="$1"; SHA="$2"
+# ``ROTATION`` env still honored for back-compat; ``$3`` positional takes
+# precedence (``submit_b200.sh --command`` only reliably forwards ONE
+# inline env var prefix — see README — so the positional arg is the
+# robust path for additional toggles).
+if [[ $# -ge 3 ]]; then
+    ROTATION="$3"
+fi
 
 case "$SHORT" in
     mixtral8x7b)
